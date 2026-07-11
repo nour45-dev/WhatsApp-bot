@@ -1,0 +1,28 @@
+FROM node:20-slim
+
+# تثبيت Chromium ومتطلباته (whatsapp-web.js محتاجة متصفح يشتغل من تحت)
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-freefont-ttf \
+    libxss1 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# منع Puppeteer من تنزيل نسخة تانية من كروميوم (هنستخدم اللي ثبتناها فوق)
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install --omit=dev
+
+COPY . .
+
+# منصات الاستضافة بتحدد المنفذ عن طريق متغير PORT تلقائيًا
+EXPOSE 3000
+
+CMD ["node", "qr-version/index.js"]

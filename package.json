@@ -1,0 +1,23 @@
+{
+  "name": "whatsapp-schedule-bot",
+  "version": "2.0.0",
+  "description": "بوت واتساب ذكي (بدون AI مدفوع) - نسختين: QR (whatsapp-web.js) و Meta Cloud API الرسمية",
+  "main": "qr-version/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node qr-version/index.js",
+    "start:qr": "node qr-version/index.js",
+    "start:meta": "node meta-api-version/index.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.34.7",
+    "qrcode-terminal": "^0.12.0",
+    "qrcode": "^1.5.4",
+    "express": "^4.21.1",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
