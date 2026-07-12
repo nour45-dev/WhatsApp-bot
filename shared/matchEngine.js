@@ -112,7 +112,7 @@ function normalizeSimple(text) {
 
 function tokenize(text) {
   const withDigits = replaceOrdinalWords(normalizeArabic(text));
-  return withDigits.split(' ').filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+  return withDigits.split(' ').filter(w => (w.length >= 2 || /^[0-9]+$/.test(w)) && !STOP_WORDS.has(w));
 }
 
 function levenshtein(a, b) {
