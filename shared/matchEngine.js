@@ -112,7 +112,7 @@ function normalizeSimple(text) {
 
 function tokenize(text) {
   const withDigits = replaceOrdinalWords(normalizeArabic(text));
-  return withDigits.split(' ').filter(w => (w.length >= 2 || /^[0-9]+$/.test(w)) && !STOP_WORDS.has(w));
+  return withDigits.split(' ').filter(w => w.length >= 2 && !STOP_WORDS.has(w));
 }
 
 function levenshtein(a, b) {
@@ -478,6 +478,25 @@ class MatchEngine {
 
     const tokens = tokenize(userMessage);
     const mentionsTeacher = hasTeacherNameMention(tokens, records);
+
+    // سؤال "صف/سنة + مرحلة" صريح (زي "اولي ثانوي" أو "تالتة اعدادي") من غير ذكر اسم مدرس -
+    // بنستخدم نفس منطق مطابقة الصف الدقيق (gradeMatches) بدل البحث العام، عشان رقم زي "1"
+    // مايتلخبطش مع أرقام تانية زي المواعيد أو القاعات
+    if (!mentionsTeacher && STAGE_WORDS.some(sw => normalized.includes(sw))) {
+      const gradeEntry = findEntryByHeaderMatch(records[0], ['صف']);
+      if (gradeEntry) {
+        const gradeHeader = gradeEntry[0];
+        const gradeMatchedRecords = records.filter(r => gradeMatches(userMessage, r[gradeHeader]));
+        if (gradeMatchedRecords.length) {
+          const gradeValue = gradeMatchedRecords[0][gradeHeader];
+          return {
+            text: `تمام 👍 ده جدول *${gradeValue}* بالكامل (${gradeMatchedRecords.length} حصة):\n\n${groupAndListByDay(gradeMatchedRecords)}`,
+            record: null,
+            pending: null,
+          };
+        }
+      }
+    }
 
     // لو فيه سؤال معلّق (صف/يوم) والرسالة مش بتذكر اسم مدرس جديد، جرب تحل السؤال المعلّق الأول
     // (الأولوية للسؤال المعلّق قبل تفسير الرقم كاختيار من القائمة الرئيسية)
