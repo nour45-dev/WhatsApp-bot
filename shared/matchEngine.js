@@ -480,17 +480,28 @@ class MatchEngine {
     const mentionsTeacher = hasTeacherNameMention(tokens, records);
 
     // سؤال فيه إشارة واضحة لصف/سنة (زي "تالتة"، "اولي ثانوي"، "جدول سنة تالتة") من غير ذكر اسم مدرس -
-    // بنستخدم مطابقة الصف الدقيقة (gradeMatches) بدل البحث العام، عشان رقم زي "1" مايتلخبطش مع
-    // أرقام تانية زي المواعيد أو القاعات. gradeMatches بترجع فاضي تلقائيًا لو مفيش صف مذكور أصلاً، فمفيش خطورة على باقي الأسئلة.
-    if (!mentionsTeacher) {
+    // بنستخدم مطابقة الصف الدقيقة (gradeMatches) بدل البحث العام. بنستبعد الحالة اللي فيها سؤال معلّق
+    // شغال (زي انتظار الرد على "انت في صف كام؟" بتاع مدرس معين) عشان "تالته" هنا تكمل نفس المدرس مش تفتح بحث عام جديد.
+    if (!mentionsTeacher && !(pendingCandidates && pendingCandidates.length)) {
       const gradeEntry = findEntryByHeaderMatch(records[0], ['صف']);
       if (gradeEntry) {
         const gradeHeader = gradeEntry[0];
         const gradeMatchedRecords = records.filter(r => gradeMatches(userMessage, r[gradeHeader]));
         if (gradeMatchedRecords.length) {
           const gradeValue = gradeMatchedRecords[0][gradeHeader];
+          const fullListing = groupAndListByDay(gradeMatchedRecords);
+          // واتساب بيرفض أي رسالة أطول من 4096 حرف - لو الجدول كبير أوي، نلخصه بدل ما نبعت رسالة هتتقفل
+          if (fullListing.length > 3500) {
+            const dayEntry = findEntryByHeaderMatch(gradeMatchedRecords[0], ['يوم']);
+            const daysCount = dayEntry ? new Set(gradeMatchedRecords.map(r => r[dayEntry[0]])).size : 0;
+            return {
+              text: `تمام 👍 *${gradeValue}* عنده ${gradeMatchedRecords.length} حصة موزّعة على ${daysCount} أيام - كتير عشان أبعتها في رسالة واحدة.\nقوللي يوم معين أو اسم مدرس/مادة عشان أضيقلك النتيجة.`,
+              record: null,
+              pending: gradeMatchedRecords,
+            };
+          }
           return {
-            text: `تمام 👍 ده جدول *${gradeValue}* بالكامل (${gradeMatchedRecords.length} حصة):\n\n${groupAndListByDay(gradeMatchedRecords)}`,
+            text: `تمام 👍 ده جدول *${gradeValue}* بالكامل (${gradeMatchedRecords.length} حصة):\n\n${fullListing}`,
             record: null,
             pending: null,
           };
