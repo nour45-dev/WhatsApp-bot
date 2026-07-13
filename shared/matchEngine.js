@@ -479,10 +479,10 @@ class MatchEngine {
     const tokens = tokenize(userMessage);
     const mentionsTeacher = hasTeacherNameMention(tokens, records);
 
-    // سؤال "صف/سنة + مرحلة" صريح (زي "اولي ثانوي" أو "تالتة اعدادي") من غير ذكر اسم مدرس -
-    // بنستخدم نفس منطق مطابقة الصف الدقيق (gradeMatches) بدل البحث العام، عشان رقم زي "1"
-    // مايتلخبطش مع أرقام تانية زي المواعيد أو القاعات
-    if (!mentionsTeacher && STAGE_WORDS.some(sw => normalized.includes(sw))) {
+    // سؤال فيه إشارة واضحة لصف/سنة (زي "تالتة"، "اولي ثانوي"، "جدول سنة تالتة") من غير ذكر اسم مدرس -
+    // بنستخدم مطابقة الصف الدقيقة (gradeMatches) بدل البحث العام، عشان رقم زي "1" مايتلخبطش مع
+    // أرقام تانية زي المواعيد أو القاعات. gradeMatches بترجع فاضي تلقائيًا لو مفيش صف مذكور أصلاً، فمفيش خطورة على باقي الأسئلة.
+    if (!mentionsTeacher) {
       const gradeEntry = findEntryByHeaderMatch(records[0], ['صف']);
       if (gradeEntry) {
         const gradeHeader = gradeEntry[0];
