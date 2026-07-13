@@ -52,22 +52,13 @@ const LABEL_RULES = [
   { keys: ['قاعه', 'مكان', 'فرع'], label: '🏫 القاعة' },
 ];
 
-// ترتيب أولوية الأسئلة التوضيحية اللي بيسألها البوت لما يكون فيه أكتر من نتيجة
+// ترتيب أولوية الأسئلة التوضيحية اللي بيسألها البوت - الصف/السنة بس،
+// وبعدها بيعرض كل المواعيد المطابقة مباشرة من غير ما يسأل عن يوم أو ميعاد كمان
 const DISCRIMINATING_FIELDS = [
   {
     headerKeywords: GRADE_HEADER_KEYWORDS,
     matches: (msg, val) => gradeMatches(msg, val),
     askText: (teacherName, values) => `تمام 👍 ${teacherName} بيدرّس أكتر من صف (${values.join(' - ')}).\nانت في صف/سنة كام عشان أبعتلك المعاد الصحيح؟`,
-  },
-  {
-    headerKeywords: ['يوم'],
-    matches: (msg, val) => fieldTextMatches(msg, val),
-    askText: (teacherName, values) => `تمام في أكتر من يوم بنفس المواصفات دي (${values.join(' - ')}).\nيوم إيه بالظبط؟`,
-  },
-  {
-    headerKeywords: ['ميعاد', 'وقت', 'ساعه'],
-    matches: (msg, val) => fieldTextMatches(msg, val),
-    askText: (teacherName, values) => `فيه أكتر من ميعاد متاح (${values.join(' - ')}).\nانهي ميعاد بالظبط؟`,
   },
 ];
 
