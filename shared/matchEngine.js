@@ -18,6 +18,11 @@ const GREETINGS = [
   'السلام عليكم', 'سلام عليكم', 'اهلا', 'أهلا', 'هاي', 'هلا',
   'ازيك', 'إزيك', 'صباح الخير', 'مساء الخير', 'مرحبا',
 ];
+const IDENTITY_TRIGGERS = [
+  'انت مين', 'أنت مين', 'مين انت', 'مين أنت', 'انتا مين', 'انتي مين',
+  'انت بوت', 'أنت بوت', 'هل انت بوت', 'انت روبوت', 'انت انسان',
+  'مين بيرد عليا', 'مين بيتكلم معايا',
+];
 const THANKS_WORDS = ['شكرا', 'متشكر', 'تسلم', 'يعطيك العافيه', 'مشكور', 'الله يخليك', 'ربنا يخليك'];
 const FAREWELL_WORDS = ['مع السلامه', 'باي', 'تصبح على خير', 'وداعا'];
 const FULL_LIST_TRIGGERS = ['الجدول كله', 'كل المواعيد', 'كل الجدول', 'عرض الجدول', 'شوف الجدول'];
@@ -237,6 +242,23 @@ function hasTeacherNameMention(tokens, records) {
   ));
 }
 
+// هل الرسالة بتذكر اسم مادة موجودة في البيانات؟ (نفس فكرة hasTeacherNameMention بس للمواد)
+function hasSubjectMention(tokens, records) {
+  if (!tokens.length) return false;
+  const subjectTokens = new Set();
+  records.forEach(rec => {
+    Object.entries(rec).forEach(([header, value]) => {
+      if (normalizeArabic(header).includes('ماده')) {
+        tokenize(value).forEach(t => subjectTokens.add(t));
+      }
+    });
+  });
+  const subjectTokensArr = [...subjectTokens];
+  return tokens.some(qt => subjectTokensArr.some(st =>
+    st === qt || st.includes(qt) || qt.includes(st) || similarity(st, qt) >= 0.8
+  ));
+}
+
 // بيلاقي أول حقل (بترتيب الأولوية) لسه مختلف بين المرشحين، عشان نسأل عنه
 function findNextDiscriminatingField(candidates) {
   for (const field of DISCRIMINATING_FIELDS) {
@@ -358,6 +380,13 @@ class MatchEngine {
     if (containsAny(normalized, FAREWELL_WORDS)) {
       return { text: pickRandom(FAREWELL_REPLIES), record: null, pending: null };
     }
+    if (containsAny(normalized, IDENTITY_TRIGGERS)) {
+      return {
+        text: `أنا المساعد الذكي بتاع ${this.businessName} 🎓\nمهمتي إني أساعدك تعرف مواعيد المدرسين والمواد بسرعة، ٢٤ ساعة في اليوم.\nقولي اسم المدرس أو المادة اللي عايز تعرف معادها.`,
+        record: null,
+        pending: null,
+      };
+    }
     if (containsAny(normalized, MENU_TRIGGER_WORDS)) {
       return { text: buildMenuTextForQr(this.businessName), record: null, pending: null, showMenu: true };
     }
@@ -370,10 +399,12 @@ class MatchEngine {
 
     const tokens = tokenize(userMessage);
     const mentionsTeacher = hasTeacherNameMention(tokens, records);
+    const mentionsSubject = hasSubjectMention(tokens, records);
+    const isNewQuery = mentionsTeacher || mentionsSubject;
 
-    // لو فيه سؤال معلّق (صف/يوم) والرسالة مش بتذكر اسم مدرس جديد، جرب تحل السؤال المعلّق الأول
+    // لو فيه سؤال معلّق (صف/يوم) والرسالة مش بتذكر اسم مدرس أو مادة جديدة، جرب تحل السؤال المعلّق الأول
     // (الأولوية للسؤال المعلّق قبل تفسير الرقم كاختيار من القائمة الرئيسية)
-    if (pendingCandidates && pendingCandidates.length && !mentionsTeacher) {
+    if (pendingCandidates && pendingCandidates.length && !isNewQuery) {
       const narrowed = narrowCandidatesByMessage(userMessage, pendingCandidates);
       if (narrowed.length && narrowed.length < pendingCandidates.length) {
         return this.resolveCandidates(userMessage, narrowed);
