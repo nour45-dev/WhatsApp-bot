@@ -7,6 +7,8 @@ function buildCsvUrl(sheetId, gid) {
 }
 
 // Parser بسيط لملفات CSV (بيراعي الفواصل جوه علامات تنصيص "")
+// ملحوظة: بيحتفظ بالصفوف الفاضية كمان (عكس النسخة القديمة) عشان نستخدمها كـ"حواجز"
+// بين مجموعات الأيام المختلفة في forward-fill بدل ما نخلط بينهم.
 function parseCsv(csvText) {
   const rows = [];
   let row = [];
@@ -41,43 +43,51 @@ function parseCsv(csvText) {
     row.push(field.trim());
     rows.push(row);
   }
-  return rows.filter(r => r.some(cell => cell !== ''));
+  return rows;
 }
 
-// جوجل شيتس بيصدّر الخلايا المدمجة (Merged Cells) فاضية في كل الصفوف عدا الأولى.
-// ده بيأثر غالبًا على عمود "اليوم" في جداول المواعيد (يوم واحد لصفوف كتير مجمّعة تحته).
-// الدالة دي بتـ"نزّل" آخر قيمة معروفة على الصفوف الفاضية اللي بعدها.
-function forwardFillMergedColumns(records, headers) {
-  const mergedHeaders = headers.filter(h => h && h.includes('يوم'));
-  if (!mergedHeaders.length) return records;
-
-  const lastValues = {};
-  return records.map(rec => {
-    const newRec = { ...rec };
-    mergedHeaders.forEach(h => {
-      const val = (newRec[h] || '').toString().trim();
-      if (val && val !== '-') {
-        lastValues[h] = val;
-      } else if (lastValues[h]) {
-        newRec[h] = lastValues[h];
-      }
-    });
-    return newRec;
-  });
+function isBlankRow(row) {
+  return row.every(cell => !cell || cell.toString().trim() === '');
 }
 
-// بيحول الصفوف الخام لمصفوفة objects {header: value} عشان يبقى سهل البحث فيها
+// بيحول الصفوف الخام لمصفوفة objects {header: value}، مع تعبئة تلقائية للخلايا
+// المدمجة (زي عمود اليوم) لكن بحدود: لو فيه صف فاضي (حاجز بين مجموعتين)،
+// بنصفّر القيم المحفوظة عشان مانورّيش يوم غلط لمجموعة تانية (نسيب الخانة فاضية
+// بدل ما نخمن غلط - أأمن للعميل).
 function rowsToObjects(rows) {
   if (!rows.length) return { headers: [], records: [] };
   const headers = rows[0];
-  let records = rows.slice(1).map(r => {
+  const dataRows = rows.slice(1);
+  const mergedHeaders = headers.filter(h => h && h.includes('يوم'));
+
+  const lastValues = {};
+  const records = [];
+
+  dataRows.forEach(r => {
+    if (isBlankRow(r)) {
+      // حاجز بين مجموعتين - نصفّر الذاكرة عشان مايحصلش تسريب من مجموعة لمجموعة
+      Object.keys(lastValues).forEach(k => delete lastValues[k]);
+      return;
+    }
+
     const obj = {};
     headers.forEach((h, i) => {
       obj[h || `عمود${i + 1}`] = r[i] || '';
     });
-    return obj;
+
+    mergedHeaders.forEach(h => {
+      const val = (obj[h] || '').toString().trim();
+      if (val && val !== '-') {
+        lastValues[h] = val;
+      } else if (lastValues[h]) {
+        obj[h] = lastValues[h];
+      }
+      // لو مفيش قيمة محفوظة (زي أول صف بعد حاجز فاضي)، الخانة بتفضل فاضية عمدًا
+    });
+
+    records.push(obj);
   });
-  records = forwardFillMergedColumns(records, headers);
+
   return { headers, records };
 }
 
@@ -115,7 +125,7 @@ class SheetService {
       return this.cache;
     } catch (err) {
       console.error('[Sheet] فشل تحديث الشيت:', err.message);
-      return this.cache; // رجّع آخر نسخة متاحة لو التحديث فشل
+      return this.cache;
     }
   }
 
