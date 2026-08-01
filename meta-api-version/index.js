@@ -68,6 +68,21 @@ const metaClient = new MetaClient({
 const CONTEXT_TTL_MS = 15 * 60 * 1000;
 const contextStore = new Map(); // from -> { lastRecord, pendingCandidates, ts }
 
+// ---- تاريخ آخر 15 رسالة لكل عميل (بيتفيد بيه الذكاء الاصطناعي الاحتياطي كسياق) ----
+const HISTORY_LIMIT = 15;
+const historyStore = new Map(); // from -> [{ role, content }]
+
+function getHistory(from) {
+  return historyStore.get(from) || [];
+}
+
+function pushHistory(from, role, content) {
+  const history = historyStore.get(from) || [];
+  history.push({ role, content });
+  while (history.length > HISTORY_LIMIT) history.shift();
+  historyStore.set(from, history);
+}
+
 function getContext(from) {
   const ctx = contextStore.get(from);
   if (!ctx) return { lastRecord: null, pendingCandidates: null };
@@ -168,7 +183,7 @@ app.post('/webhook', async (req, res) => {
 
     // لو المحرك العادي معرفش يرد، جرب الذكاء الاصطناعي الاحتياطي (لو مفعّل) قبل ما نستسلم
     if (isFallback) {
-      const aiAnswer = await aiFallback.tryAnswer(userMessage, readableFullText);
+      const aiAnswer = await aiFallback.tryAnswer(userMessage, readableFullText, getHistory(from));
       if (aiAnswer) reply = aiAnswer;
     }
 
@@ -182,6 +197,8 @@ app.post('/webhook', async (req, res) => {
       await metaClient.sendText(from, reply);
     }
     setContext(from, { record: matchedRecord, pending });
+    pushHistory(from, 'user', userMessage);
+    pushHistory(from, 'assistant', reply);
 
     console.log(`📤 تم الرد على ${from}: ${reply.slice(0, 80)}...`);
   } catch (err) {
