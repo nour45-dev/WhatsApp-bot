@@ -148,6 +148,15 @@ function getTeacherName(record) {
   return entry ? entry[1] : '';
 }
 
+// بيتأكد إن المعاد ده ليه يوم واضح في الشيت (مش فاضي أو "-")
+// بنستخدمها عشان نستبعد أي صف بيانات ناقصة/مكررة من نتائج البحث
+function hasValidDay(record) {
+  const entry = findEntryByHeaderMatch(record, ['يوم']);
+  if (!entry) return true; // مفيش عمود "يوم" أصلاً في الشيت - متأثرش بالفلتر ده
+  const val = (entry[1] || '').toString().trim();
+  return val !== '' && val !== '-';
+}
+
 function getLabel(header) {
   const h = normalizeArabic(header);
   const rule = LABEL_RULES.find(r => r.keys.some(k => h.includes(k)));
@@ -435,8 +444,11 @@ class MatchEngine {
       return { text: menuChoice.hint, record: null, pending: null };
     }
 
+    // نستبعد أي معاد ملوش يوم واضح (بيانات ناقصة/مكررة) من نتائج البحث
+    const usableRecords = records.filter(hasValidDay);
+
     if (tokens.length) {
-      const scored = this.scoreRecords(records, tokens).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
+      const scored = this.scoreRecords(usableRecords, tokens).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
       if (scored.length) {
         const topScore = scored[0].score;
         const topMatches = scored.filter(s => s.score >= topScore * 0.8).slice(0, 8).map(s => s.record);
