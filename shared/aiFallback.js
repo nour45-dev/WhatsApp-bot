@@ -36,7 +36,7 @@ ${scheduleText}
 3. رد قصير مناسب للواتساب، من غير مقدمات، ومن غير رموز ماركداون زي ** أو #.`;
   }
 
-  async tryOpenRouter(userMessage, scheduleText) {
+  async tryOpenRouter(userMessage, scheduleText, history = []) {
     if (!this.openrouterKey) return null;
     try {
       const res = await axios.post(
@@ -45,6 +45,7 @@ ${scheduleText}
           model: OPENROUTER_MODEL,
           messages: [
             { role: 'system', content: this.buildSystemPrompt(scheduleText) },
+            ...history,
             { role: 'user', content: userMessage },
           ],
           max_tokens: 300,
@@ -65,14 +66,19 @@ ${scheduleText}
     }
   }
 
-  async tryGemini(userMessage, scheduleText) {
+  async tryGemini(userMessage, scheduleText, history = []) {
     if (!this.geminiKey) return null;
     try {
+      // Gemini بيستخدم role: 'model' بدل 'assistant'
+      const historyContents = history.map(h => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }],
+      }));
       const res = await axios.post(
         `${GEMINI_URL}?key=${this.geminiKey}`,
         {
           system_instruction: { parts: [{ text: this.buildSystemPrompt(scheduleText) }] },
-          contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+          contents: [...historyContents, { role: 'user', parts: [{ text: userMessage }] }],
         },
         {
           headers: { 'Content-Type': 'application/json' },
@@ -88,13 +94,14 @@ ${scheduleText}
   }
 
   // بيجرب OpenRouter الأول، ولو رجع null (فشل أو مفيش مفتاح) يجرب Gemini تلقائيًا بدل منه
-  async tryAnswer(userMessage, scheduleText) {
+  // history: آخر رسائل المحادثة (زودها لو متاحة عشان يفهم السياق مش بس آخر رسالة)
+  async tryAnswer(userMessage, scheduleText, history = []) {
     if (!this.enabled) return null;
 
-    const openrouterAnswer = await this.tryOpenRouter(userMessage, scheduleText);
+    const openrouterAnswer = await this.tryOpenRouter(userMessage, scheduleText, history);
     if (openrouterAnswer) return openrouterAnswer;
 
-    const geminiAnswer = await this.tryGemini(userMessage, scheduleText);
+    const geminiAnswer = await this.tryGemini(userMessage, scheduleText, history);
     if (geminiAnswer) return geminiAnswer;
 
     return null; // الاتنين فشلوا - هنرجع للرد الاحتياطي العادي (التواصل مع الإدارة)
