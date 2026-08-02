@@ -198,18 +198,22 @@ function replaceOrdinalWords(normalizedText) {
 function extractGradeTokens(message) {
   const normalized = replaceOrdinalWords(normalizeArabic(message));
   const words = normalized.split(' ').filter(Boolean);
-  const candidates = [];
+  const numberCandidates = [];
+  const stageCandidates = [];
   words.forEach((w, i) => {
     if (/^[0-9]/.test(w)) {
-      candidates.push(w);
+      numberCandidates.push(w);
       if (words[i + 1] && /^[a-zء-ي]/.test(words[i + 1]) && words[i + 1].length <= 3) {
-        candidates.push(w + words[i + 1]); // زي "3" + "ث" مكتوبين منفصلين
+        numberCandidates.push(w + words[i + 1]); // زي "3" + "ث" مكتوبين منفصلين
       }
     } else if (STAGE_WORDS.some(sw => w.includes(sw))) {
-      candidates.push(w);
+      stageCandidates.push(w);
     }
   });
-  return candidates;
+  // لو فيه رقم/ترتيب واضح ("تالتة" ← "3")، بنعتمد عليه بس لأنه أدق.
+  // كلمة المرحلة العامة زي "ثانوي" لوحدها بتكون موجودة في اولى/تانية/تالتة ثانوي كلهم،
+  // فلو سبناها تتطابق برضه هتطابق أي سنة غلط. بنستخدمها بس لو مفيش رقم خالص في الرسالة.
+  return numberCandidates.length ? numberCandidates : stageCandidates;
 }
 
 // مطابقة الصف: بتستخرج الأجزاء اللي شكلها "صف" من الرسالة وتقارنها بقيمة الشيت
@@ -301,6 +305,24 @@ function narrowCandidatesByMessage(userMessage, candidates) {
 function listRecords(records) {
   return records.map((r, i) => `${i + 1})\n${formatRecordPro(r)}`).join('\n\n');
 }
+
+// بيدور على كل السجلات اللي "الصف/السنة" بتاعها بتطابق السنة المذكورة في رسالة العميل
+// (زي "مواعيد سنة تالتة ثانوي" من غير ما يقول اسم مدرس أو مادة)
+function findRecordsByGrade(userMessage, records) {
+  const gradeTokens = extractGradeTokens(userMessage);
+  if (!gradeTokens.length) return null;
+
+  const matches = records.filter(r => {
+    const entry = findEntryByHeaderMatch(r, GRADE_HEADER_KEYWORDS);
+    return entry && gradeMatches(userMessage, entry[1]);
+  });
+  return matches.length ? matches : null;
+}
+
+const GRADE_LIST_INTROS = [
+  (grade) => `🎓 اتفضل، دي مواعيد ${grade} كاملة:`,
+  (grade) => `تمام 👍 ده جدول ${grade} بالكامل:`,
+];
 
 class MatchEngine {
   constructor({ adminName, adminPhone, businessName }) {
@@ -445,7 +467,33 @@ class MatchEngine {
     }
 
     // نستبعد أي معاد ملوش يوم واضح (بيانات ناقصة/مكررة) من نتائج البحث
-    const usableRecords = records.filter(hasValidDay);
+    const usableRecordsEarly = records.filter(hasValidDay);
+
+    // سؤال عن سنة/صف لوحده من غير اسم مدرس أو مادة (زي "مواعيد سنة تالتة ثانوي")
+    // - محرك التقييم العادي بيتلخبط في الحالة دي (لأنه بيقارن نصوص حرفية، مش أرقام/ترتيب)
+    // فبنستخدم منطق مطابقة السنة المخصص (نفس اللي بيسأل بيه البوت لما مدرس بيدرّس أكتر من صف)
+    if (!mentionsTeacher && !mentionsSubject) {
+      const gradeResults = findRecordsByGrade(userMessage, usableRecordsEarly);
+      if (gradeResults) {
+        if (gradeResults.length === 1) {
+          return { text: formatRecordPro(gradeResults[0]), record: gradeResults[0], pending: null };
+        }
+        const gradeEntry = findEntryByHeaderMatch(gradeResults[0], GRADE_HEADER_KEYWORDS);
+        const gradeLabel = gradeEntry ? gradeEntry[1] : 'الصف ده';
+        const intro = pickRandom(GRADE_LIST_INTROS)(gradeLabel);
+        const listText = listRecords(gradeResults);
+        if ((intro + listText).length > 3500) {
+          return {
+            text: `جدول ${gradeLabel} كبير شوية 🙏 قوللي كمان اسم المدرس أو المادة اللي محتاج تعرف معادها وهبعتلك التفاصيل على طول.`,
+            record: null,
+            pending: null,
+          };
+        }
+        return { text: `${intro}\n\n${listText}`, record: null, pending: null };
+      }
+    }
+
+    const usableRecords = usableRecordsEarly;
 
     if (tokens.length) {
       const scored = this.scoreRecords(usableRecords, tokens).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
