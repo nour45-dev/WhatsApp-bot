@@ -13,6 +13,7 @@ const {
   ADMIN_NAME,
   ADMIN_PHONE,
   BUSINESS_NAME,
+  BUSINESS_ADDRESS,
   SHEET_REFRESH_MINUTES,
   META_VERIFY_TOKEN,
   META_ACCESS_TOKEN,
@@ -44,6 +45,7 @@ const matchEngine = new MatchEngine({
   adminName: ADMIN_NAME || 'الإدارة',
   adminPhone: ADMIN_PHONE || '',
   businessName,
+  businessAddress: BUSINESS_ADDRESS || '',
 });
 
 const aiFallback = new AiFallback({
