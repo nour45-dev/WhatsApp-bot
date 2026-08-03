@@ -198,22 +198,18 @@ function replaceOrdinalWords(normalizedText) {
 function extractGradeTokens(message) {
   const normalized = replaceOrdinalWords(normalizeArabic(message));
   const words = normalized.split(' ').filter(Boolean);
-  const numberCandidates = [];
-  const stageCandidates = [];
+  const candidates = [];
   words.forEach((w, i) => {
     if (/^[0-9]/.test(w)) {
-      numberCandidates.push(w);
+      candidates.push(w);
       if (words[i + 1] && /^[a-zء-ي]/.test(words[i + 1]) && words[i + 1].length <= 3) {
-        numberCandidates.push(w + words[i + 1]); // زي "3" + "ث" مكتوبين منفصلين
+        candidates.push(w + words[i + 1]); // زي "3" + "ث" مكتوبين منفصلين
       }
     } else if (STAGE_WORDS.some(sw => w.includes(sw))) {
-      stageCandidates.push(w);
+      candidates.push(w);
     }
   });
-  // لو فيه رقم/ترتيب واضح ("تالتة" ← "3")، بنعتمد عليه بس لأنه أدق.
-  // كلمة المرحلة العامة زي "ثانوي" لوحدها بتكون موجودة في اولى/تانية/تالتة ثانوي كلهم،
-  // فلو سبناها تتطابق برضه هتطابق أي سنة غلط. بنستخدمها بس لو مفيش رقم خالص في الرسالة.
-  return numberCandidates.length ? numberCandidates : stageCandidates;
+  return candidates;
 }
 
 // مطابقة الصف: بتستخرج الأجزاء اللي شكلها "صف" من الرسالة وتقارنها بقيمة الشيت
@@ -272,6 +268,22 @@ function hasSubjectMention(tokens, records) {
   ));
 }
 
+// بيرجع أسماء كل المدرسين المذكورين في الرسالة (ممكن يكون أكتر من واحد في نفس السؤال)
+// بيطلب تطابق أغلب أجزاء الاسم (مش كلمة مشتركة بس زي "محمد" اللي ممكن تكون بداية أسماء كتير)
+function findMentionedTeachers(tokens, records) {
+  if (!tokens.length) return [];
+  const teacherNames = [...new Set(records.map(r => getTeacherName(r)).filter(Boolean))];
+
+  return teacherNames.filter(name => {
+    const nameTokens = tokenize(name);
+    if (!nameTokens.length) return false;
+    const matchedCount = nameTokens.filter(nt => tokens.some(qt =>
+      nt === qt || similarity(nt, qt) >= 0.8
+    )).length;
+    return matchedCount / nameTokens.length >= 0.6; // لازم أغلب أجزاء الاسم تتطابق
+  });
+}
+
 // بيلاقي أول حقل (بترتيب الأولوية) لسه مختلف بين المرشحين، عشان نسأل عنه
 function findNextDiscriminatingField(candidates) {
   for (const field of DISCRIMINATING_FIELDS) {
@@ -305,24 +317,6 @@ function narrowCandidatesByMessage(userMessage, candidates) {
 function listRecords(records) {
   return records.map((r, i) => `${i + 1})\n${formatRecordPro(r)}`).join('\n\n');
 }
-
-// بيدور على كل السجلات اللي "الصف/السنة" بتاعها بتطابق السنة المذكورة في رسالة العميل
-// (زي "مواعيد سنة تالتة ثانوي" من غير ما يقول اسم مدرس أو مادة)
-function findRecordsByGrade(userMessage, records) {
-  const gradeTokens = extractGradeTokens(userMessage);
-  if (!gradeTokens.length) return null;
-
-  const matches = records.filter(r => {
-    const entry = findEntryByHeaderMatch(r, GRADE_HEADER_KEYWORDS);
-    return entry && gradeMatches(userMessage, entry[1]);
-  });
-  return matches.length ? matches : null;
-}
-
-const GRADE_LIST_INTROS = [
-  (grade) => `🎓 اتفضل، دي مواعيد ${grade} كاملة:`,
-  (grade) => `تمام 👍 ده جدول ${grade} بالكامل:`,
-];
 
 class MatchEngine {
   constructor({ adminName, adminPhone, businessName }) {
@@ -388,6 +382,41 @@ class MatchEngine {
       record: null,
       pending: narrowed,
     };
+  }
+
+  // بيبني رد احترافي موحّد لأكتر من مدرس اتذكروا في نفس الرسالة (زي "مواعيد نور وعلام وصلاح 3ث")
+  // بيقرا من الشيت مباشرة (مش تخمين)، وبيفلتر بالصف لو العميل حدده
+  buildMultiTeacherReply(userMessage, teacherNames, records) {
+    const sections = teacherNames.map(name => {
+      let teacherRecords = records.filter(r => getTeacherName(r) === name);
+
+      const byGrade = teacherRecords.filter(r => {
+        const e = findEntryByHeaderMatch(r, GRADE_HEADER_KEYWORDS);
+        return e && gradeMatches(userMessage, e[1]);
+      });
+      if (byGrade.length) teacherRecords = byGrade;
+
+      if (!teacherRecords.length) {
+        return `👨‍🏫 ${name}\nمعلش، مالقيتش معاد مطابق ليه.`;
+      }
+
+      const lines = teacherRecords.map(r => {
+        const dayEntry = findEntryByHeaderMatch(r, ['يوم']);
+        const timeEntry = findEntryByHeaderMatch(r, ['ميعاد', 'وقت', 'ساعه']);
+        const roomEntry = findEntryByHeaderMatch(r, ['قاعه', 'مكان', 'فرع']);
+        const subjectEntry = findEntryByHeaderMatch(r, ['ماده']);
+        const parts = [];
+        if (dayEntry && dayEntry[1]) parts.push(`📅 ${dayEntry[1]}`);
+        if (timeEntry && timeEntry[1]) parts.push(`🕒 ${timeEntry[1]}`);
+        if (roomEntry && roomEntry[1]) parts.push(`🏫 ${roomEntry[1]}`);
+        if (subjectEntry && subjectEntry[1]) parts.push(`📚 ${subjectEntry[1]}`);
+        return parts.join('  |  ');
+      });
+
+      return `👨‍🏫 *${name}*\n${lines.join('\n')}`;
+    });
+
+    return { text: sections.join('\n\n'), record: null, pending: null };
   }
 
   /**
@@ -467,33 +496,13 @@ class MatchEngine {
     }
 
     // نستبعد أي معاد ملوش يوم واضح (بيانات ناقصة/مكررة) من نتائج البحث
-    const usableRecordsEarly = records.filter(hasValidDay);
+    const usableRecords = records.filter(hasValidDay);
 
-    // سؤال عن سنة/صف لوحده من غير اسم مدرس أو مادة (زي "مواعيد سنة تالتة ثانوي")
-    // - محرك التقييم العادي بيتلخبط في الحالة دي (لأنه بيقارن نصوص حرفية، مش أرقام/ترتيب)
-    // فبنستخدم منطق مطابقة السنة المخصص (نفس اللي بيسأل بيه البوت لما مدرس بيدرّس أكتر من صف)
-    if (!mentionsTeacher && !mentionsSubject) {
-      const gradeResults = findRecordsByGrade(userMessage, usableRecordsEarly);
-      if (gradeResults) {
-        if (gradeResults.length === 1) {
-          return { text: formatRecordPro(gradeResults[0]), record: gradeResults[0], pending: null };
-        }
-        const gradeEntry = findEntryByHeaderMatch(gradeResults[0], GRADE_HEADER_KEYWORDS);
-        const gradeLabel = gradeEntry ? gradeEntry[1] : 'الصف ده';
-        const intro = pickRandom(GRADE_LIST_INTROS)(gradeLabel);
-        const listText = listRecords(gradeResults);
-        if ((intro + listText).length > 3500) {
-          return {
-            text: `جدول ${gradeLabel} كبير شوية 🙏 قوللي كمان اسم المدرس أو المادة اللي محتاج تعرف معادها وهبعتلك التفاصيل على طول.`,
-            record: null,
-            pending: null,
-          };
-        }
-        return { text: `${intro}\n\n${listText}`, record: null, pending: null };
-      }
+    // لو الرسالة فيها أكتر من اسم مدرس صريح (زي "مواعيد نور وعلام وصلاح")، جاوب عليهم كلهم مرة واحدة
+    const mentionedTeachers = findMentionedTeachers(tokens, usableRecords);
+    if (mentionedTeachers.length > 1) {
+      return this.buildMultiTeacherReply(userMessage, mentionedTeachers, usableRecords);
     }
-
-    const usableRecords = usableRecordsEarly;
 
     if (tokens.length) {
       const scored = this.scoreRecords(usableRecords, tokens).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
