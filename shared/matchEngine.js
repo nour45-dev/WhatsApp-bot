@@ -148,6 +148,12 @@ function getTeacherName(record) {
   return entry ? entry[1] : '';
 }
 
+// مفتاح موحّد لاسم المدرس (بيشيل كل المسافات) عشان "ا/محمد الجوهري" و"ا/ محمد الجوهري"
+// يتعاملوا كنفس المدرس، حتى لو الشيت فيه فروق بسيطة في التباعد
+function teacherKey(name) {
+  return normalizeArabic(name).replace(/\s+/g, '');
+}
+
 // بيتأكد إن المعاد ده ليه يوم واضح في الشيت (مش فاضي أو "-")
 // بنستخدمها عشان نستبعد أي صف بيانات ناقصة/مكررة من نتائج البحث
 function hasValidDay(record) {
@@ -269,19 +275,28 @@ function hasSubjectMention(tokens, records) {
 }
 
 // بيرجع أسماء كل المدرسين المذكورين في الرسالة (ممكن يكون أكتر من واحد في نفس السؤال)
-// بيطلب تطابق أغلب أجزاء الاسم (مش كلمة مشتركة بس زي "محمد" اللي ممكن تكون بداية أسماء كتير)
+// بيوحّد الأسماء المتشابهة (فروق تباعد بسيطة) الأول عشان مايعتبرش نفس المدرس اتنين
 function findMentionedTeachers(tokens, records) {
   if (!tokens.length) return [];
-  const teacherNames = [...new Set(records.map(r => getTeacherName(r)).filter(Boolean))];
 
-  return teacherNames.filter(name => {
-    const nameTokens = tokenize(name);
-    if (!nameTokens.length) return false;
+  const namesByKey = new Map();
+  records.forEach(r => {
+    const name = getTeacherName(r);
+    if (!name) return;
+    const key = teacherKey(name);
+    if (!namesByKey.has(key)) namesByKey.set(key, name); // أول صيغة شفناها بتبقى الممثلة للاسم
+  });
+
+  const matched = [];
+  for (const representativeName of namesByKey.values()) {
+    const nameTokens = tokenize(representativeName);
+    if (!nameTokens.length) continue;
     const matchedCount = nameTokens.filter(nt => tokens.some(qt =>
       nt === qt || similarity(nt, qt) >= 0.8
     )).length;
-    return matchedCount / nameTokens.length >= 0.6; // لازم أغلب أجزاء الاسم تتطابق
-  });
+    if (matchedCount / nameTokens.length >= 0.6) matched.push(representativeName);
+  }
+  return matched;
 }
 
 // بيلاقي أول حقل (بترتيب الأولوية) لسه مختلف بين المرشحين، عشان نسأل عنه
@@ -314,8 +329,38 @@ function narrowCandidatesByMessage(userMessage, candidates) {
   return narrowed;
 }
 
+// سطر مختصر لمعاد واحد: يوم | ساعة | مادة بس (من غير قاعة أو صف - العرض المفضّل عند تعدد النتايج)
+function formatCompactLine(record) {
+  const dayEntry = findEntryByHeaderMatch(record, ['يوم']);
+  const timeEntry = findEntryByHeaderMatch(record, ['ميعاد', 'وقت', 'ساعه']);
+  const subjectEntry = findEntryByHeaderMatch(record, ['ماده']);
+  const parts = [];
+  if (dayEntry && dayEntry[1]) parts.push(`📅 ${dayEntry[1]}`);
+  if (timeEntry && timeEntry[1]) parts.push(`🕒 ${timeEntry[1]}`);
+  if (subjectEntry && subjectEntry[1]) parts.push(`📚 ${subjectEntry[1]}`);
+  return parts.join('  |  ');
+}
+
+// بيجمّع أي مجموعة معادات تحت اسم كل مدرس (موحّد بالمفتاح) بالشكل المبسّط
 function listRecords(records) {
-  return records.map((r, i) => `${i + 1})\n${formatRecordPro(r)}`).join('\n\n');
+  const order = [];
+  const groups = new Map();
+
+  records.forEach(r => {
+    const name = getTeacherName(r) || 'غير معروف';
+    const key = teacherKey(name);
+    if (!groups.has(key)) {
+      groups.set(key, { name, items: [] });
+      order.push(key);
+    }
+    groups.get(key).items.push(r);
+  });
+
+  return order.map(key => {
+    const group = groups.get(key);
+    const lines = group.items.map(r => formatCompactLine(r));
+    return `👨‍🏫 *${group.name}*\n${lines.join('\n')}`;
+  }).join('\n\n');
 }
 
 class MatchEngine {
@@ -388,7 +433,8 @@ class MatchEngine {
   // بيقرا من الشيت مباشرة (مش تخمين)، وبيفلتر بالصف لو العميل حدده
   buildMultiTeacherReply(userMessage, teacherNames, records) {
     const sections = teacherNames.map(name => {
-      let teacherRecords = records.filter(r => getTeacherName(r) === name);
+      const key = teacherKey(name);
+      let teacherRecords = records.filter(r => teacherKey(getTeacherName(r)) === key);
 
       const byGrade = teacherRecords.filter(r => {
         const e = findEntryByHeaderMatch(r, GRADE_HEADER_KEYWORDS);
@@ -397,22 +443,10 @@ class MatchEngine {
       if (byGrade.length) teacherRecords = byGrade;
 
       if (!teacherRecords.length) {
-        return `👨‍🏫 ${name}\nمعلش، مالقيتش معاد مطابق ليه.`;
+        return `👨‍🏫 *${name}*\nمعلش، مالقيتش معاد مطابق ليه.`;
       }
 
-      const lines = teacherRecords.map(r => {
-        const dayEntry = findEntryByHeaderMatch(r, ['يوم']);
-        const timeEntry = findEntryByHeaderMatch(r, ['ميعاد', 'وقت', 'ساعه']);
-        const roomEntry = findEntryByHeaderMatch(r, ['قاعه', 'مكان', 'فرع']);
-        const subjectEntry = findEntryByHeaderMatch(r, ['ماده']);
-        const parts = [];
-        if (dayEntry && dayEntry[1]) parts.push(`📅 ${dayEntry[1]}`);
-        if (timeEntry && timeEntry[1]) parts.push(`🕒 ${timeEntry[1]}`);
-        if (roomEntry && roomEntry[1]) parts.push(`🏫 ${roomEntry[1]}`);
-        if (subjectEntry && subjectEntry[1]) parts.push(`📚 ${subjectEntry[1]}`);
-        return parts.join('  |  ');
-      });
-
+      const lines = teacherRecords.map(r => formatCompactLine(r));
       return `👨‍🏫 *${name}*\n${lines.join('\n')}`;
     });
 
@@ -514,14 +548,19 @@ class MatchEngine {
           return { text: formatRecordPro(topMatches[0]), record: topMatches[0], pending: null };
         }
 
-        const sameTeacher = topMatches.every(r => getTeacherName(r) === getTeacherName(topMatches[0]));
+        const sameTeacher = topMatches.every(r => teacherKey(getTeacherName(r)) === teacherKey(getTeacherName(topMatches[0])));
         if (sameTeacher) {
           return this.resolveCandidates(userMessage, topMatches);
         }
 
         // نتايج لمدرسين مختلفين - غالبًا سؤال عن مادة ("مين بيدرّس احياء؟")
         // نرجع أسماء المدرسين بس بدل ما نغرقه في تفاصيل كل حصة
-        const teacherNames = [...new Set(topMatches.map(r => getTeacherName(r)).filter(Boolean))];
+        const uniqueTeachersByKey = new Map();
+        topMatches.forEach(r => {
+          const n = getTeacherName(r);
+          if (n && !uniqueTeachersByKey.has(teacherKey(n))) uniqueTeachersByKey.set(teacherKey(n), n);
+        });
+        const teacherNames = [...uniqueTeachersByKey.values()];
         if (teacherNames.length > 1) {
           const namesList = teacherNames.map(n => `👨‍🏫 ${n}`).join('\n');
           return {
