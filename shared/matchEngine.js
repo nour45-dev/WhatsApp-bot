@@ -68,9 +68,13 @@ const DISCRIMINATING_FIELDS = [
 ];
 
 const GREETING_REPLIES = [
-  (biz) => `أهلًا بيك في ${biz} 👋`,
-  (biz) => `أهلين! 😊 معاك ${biz}، تحت أمرك.`,
-  (biz) => `يا هلا بيك 👋 معاك ${biz}.`,
+  (biz, addr) => `أهلًا بيك في ${biz} 👋${addr ? `\n📍 ${addr}` : ''}`,
+  (biz, addr) => `أهلين! 😊 معاك ${biz}، تحت أمرك.${addr ? `\n📍 ${addr}` : ''}`,
+  (biz, addr) => `يا هلا بيك 👋 معاك ${biz}.${addr ? `\n📍 ${addr}` : ''}`,
+];
+const ADDRESS_TRIGGERS = [
+  'العنوان', 'عنوان المركز', 'فين المركز', 'مكان المركز', 'وين المركز',
+  'فينك', 'فين انتوا', 'عنوانكم', 'اين المركز', 'موقع المركز',
 ];
 const MULTI_MATCH_INTROS = ['لقيت أكتر من نتيجة قريبة من سؤالك:', 'عندي أكتر من خيار ممكن يكون ده اللي محتاجه:'];
 const THANKS_REPLIES = ['العفو! 🙏 تحت أمرك في أي وقت.', 'ولا يهمك، أنا موجود لو محتاج أي حاجة تانية 😊', 'الله يخليك، اتفضل لو عندك سؤال تاني.'];
@@ -364,10 +368,11 @@ function listRecords(records) {
 }
 
 class MatchEngine {
-  constructor({ adminName, adminPhone, businessName }) {
+  constructor({ adminName, adminPhone, businessName, businessAddress }) {
     this.adminName = adminName;
     this.adminPhone = adminPhone;
     this.businessName = businessName;
+    this.businessAddress = businessAddress || '';
   }
 
   fallbackMessage() {
@@ -465,7 +470,7 @@ class MatchEngine {
     const normalized = normalizeArabic(userMessage);
 
     if (containsAny(normalized, GREETINGS)) {
-      const greeting = pickRandom(GREETING_REPLIES)(this.businessName);
+      const greeting = pickRandom(GREETING_REPLIES)(this.businessName, this.businessAddress);
       return { text: `${greeting}\n\n${buildMenuTextForQr(this.businessName)}`, record: null, pending: null, showMenu: true };
     }
     if (containsAny(normalized, THANKS_WORDS)) {
@@ -477,6 +482,15 @@ class MatchEngine {
     if (containsAny(normalized, IDENTITY_TRIGGERS)) {
       return {
         text: `أنا المساعد الذكي بتاع ${this.businessName} 🎓\nمهمتي إني أساعدك تعرف مواعيد المدرسين والمواد بسرعة، ٢٤ ساعة في اليوم.\nقولي اسم المدرس أو المادة اللي عايز تعرف معادها.`,
+        record: null,
+        pending: null,
+      };
+    }
+    if (containsAny(normalized, ADDRESS_TRIGGERS)) {
+      return {
+        text: this.businessAddress
+          ? `📍 عنوان ${this.businessName}:\n${this.businessAddress}`
+          : `معلش، العنوان مش متسجل عندي دلوقتي. كلم ${this.adminName} على ${this.adminPhone} وهيدلّك عليه.`,
         record: null,
         pending: null,
       };
