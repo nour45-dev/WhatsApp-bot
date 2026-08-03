@@ -14,6 +14,7 @@ const {
   ADMIN_NAME,
   ADMIN_PHONE,
   BUSINESS_NAME,
+  BUSINESS_ADDRESS,
   SHEET_REFRESH_MINUTES,
   PORT,
   PUPPETEER_EXECUTABLE_PATH,
@@ -36,6 +37,7 @@ const matchEngine = new MatchEngine({
   adminName: ADMIN_NAME || 'الإدارة',
   adminPhone: ADMIN_PHONE || '',
   businessName: BUSINESS_NAME || 'المركز',
+  businessAddress: BUSINESS_ADDRESS || '',
 });
 
 const aiFallback = new AiFallback({
