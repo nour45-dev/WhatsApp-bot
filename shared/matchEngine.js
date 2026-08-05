@@ -6,7 +6,7 @@
 const { MENU_TRIGGER_WORDS, buildMenuTextForQr, matchMenuSelection } = require('./menu');
 
 const STOP_WORDS = new Set([
-  'في', 'من', 'الى', 'إلى', 'على', 'عن', 'مع', 'هل', 'يا',
+  'في', 'من', 'الى', 'إلى', 'الي', 'على', 'علي', 'عن', 'مع', 'هل', 'يا',
   'ايه', 'إيه', 'اي', 'إي', 'ازاي', 'إزاي', 'امتى', 'إمتى', 'متى',
   'فين', 'ممكن', 'لو', 'سمحت', 'تمام', 'اهلا', 'أهلا', 'استاذ',
   'أستاذ', 'الاستاذ', 'الأستاذ', 'مدرس', 'المدرس',
@@ -45,7 +45,7 @@ const ORDINAL_TO_DIGIT = {
   'الرابعه': '4', 'رابعه': '4', 'الرابع': '4', 'رابع': '4',
   'الخامسه': '5', 'خامسه': '5', 'الخامس': '5', 'خامس': '5',
 };
-const STAGE_WORDS = ['ثانوي', 'ثانويه', 'اعدادي', 'اعداديه', 'ابتدائي', 'ابتدائيه'];
+const STAGE_WORDS = ['ثانوي', 'ثانويه', 'اعدادي', 'اعداديه', 'ابتدائي', 'ابتدائيه', 'بكالوريا'];
 
 // تسميات أنيقة للعرض الاحترافي
 const LABEL_RULES = [
@@ -96,6 +96,10 @@ function normalizeArabic(text) {
     .replace(/ؤ/g, 'و')
     .replace(/ئ/g, 'ي')
     .replace(/ـ/g, '')
+    // تحويل الأرقام العربية (٠-٩) والفارسية (۰-۹) لأرقام إنجليزية عادية
+    // عشان كيبورد الموبايل العربي بيبعت ٢ بدل 2 غالبًا، ولازم نفهمها بنفس الشكل
+    .replace(/[\u0660-\u0669]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x0660 + 48))
+    .replace(/[\u06F0-\u06F9]/g, d => String.fromCharCode(d.charCodeAt(0) - 0x06F0 + 48))
     .replace(/[^\u0600-\u06FF0-9a-zA-Z\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -245,20 +249,18 @@ function fieldTextMatches(userMessage, candidateValue) {
 }
 
 // هل الرسالة بتذكر اسم مدرس موجود في البيانات؟ (بتفرق بين "سؤال جديد" و"رد على سؤال معلّق")
+// هل الرسالة بتذكر اسم مدرس (اسم كامل، مش كلمة واحدة مشتركة زي "على" اللي ممكن تتلخبط مع اسم "علي")
 function hasTeacherNameMention(tokens, records) {
   if (!tokens.length) return false;
-  const nameTokens = new Set();
-  records.forEach(rec => {
-    Object.entries(rec).forEach(([header, value]) => {
-      if (columnWeight(header) === 3) {
-        tokenize(value).forEach(t => nameTokens.add(t));
-      }
-    });
+  const teacherNames = [...new Set(records.map(r => getTeacherName(r)).filter(Boolean))];
+  return teacherNames.some(name => {
+    const nameTokens = tokenize(name);
+    if (!nameTokens.length) return false;
+    const matchedCount = nameTokens.filter(nt => tokens.some(qt =>
+      nt === qt || similarity(nt, qt) >= 0.8
+    )).length;
+    return matchedCount / nameTokens.length >= 0.6; // لازم أغلب أجزاء الاسم، مش كلمة واحدة بس
   });
-  const nameTokensArr = [...nameTokens];
-  return tokens.some(qt => nameTokensArr.some(nt =>
-    nt === qt || nt.includes(qt) || qt.includes(nt) || similarity(nt, qt) >= 0.8
-  ));
 }
 
 // هل الرسالة بتذكر اسم مادة موجودة في البيانات؟ (نفس فكرة hasTeacherNameMention بس للمواد)
